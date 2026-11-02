@@ -4,6 +4,11 @@ metadata:
   name: churn-api
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels: { app: churn-api }
   template:
@@ -18,6 +23,14 @@ spec:
           resources:
             requests: { cpu: 50m, memory: 100Mi }
             limits: { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           readinessProbe:
             httpGet: { path: /health, port: 8000 }
             periodSeconds: 5
