@@ -193,3 +193,37 @@ jobs:
       - name: Visa containerloggar
         if: failure()
         run: docker logs churn-smoke || true
+
+  deploy:
+    needs: build-image
+    # bara vid push till main, inte vid PR, schema eller manuell körning
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # environmentet kräver godkännande och ger tillgång till secreten KUBECONFIG
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-kubectl@v4
+      - name: Skriv kubeconfig
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
+        run: |
+          mkdir -p ~/.kube
+          printf '%s' "$KUBECONFIG_DATA" > ~/.kube/config
+          chmod 600 ~/.kube/config
+      # failar direkt om secreten är fel eller klustret inte går att nå
+      - name: Testa anslutning
+        run: |
+          kubectl auth can-i create deployments
+          kubectl get deployment churn-api
+      - name: Peka manifestet på den nya imagen
+        run: |
+          sed -i "s|image: .*|image: ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}|" k8s/deployment.yaml
+          grep "image:" k8s/deployment.yaml
+      - run: kubectl apply -f k8s/
+      - name: Vänta på utrullningen
+        id: rollout
+        run: kubectl rollout status deployment/churn-api --timeout=5m
+      - name: Rulla tillbaka om utrullningen misslyckas
+        if: failure() && steps.rollout.outcome == 'failure'
+        run: kubectl rollout undo deployment/churn-api
